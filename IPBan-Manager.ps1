@@ -20,7 +20,8 @@
         2) автоматически обнаруженные ЧАСТНЫЕ подсети интерфейсов (RFC1918, CGNAT) —
            публичные интерфейсы добавляются только своим адресом /32, а не подсетью,
            чтобы не открыть соседей по хостингу;
-        3) ручной список (админские IP, офисы, VPN).
+        3) ручной список (админские IP, офисы, VPN): IP, подсети, доменные имена
+           и URL текстовых списков адресов — имена и URL IPBan перечитывает раз в 5 минут.
     Плюс по запросу — адреса текущих RDP-подключений (чтобы не забанить себя).
 
 .EXAMPLE
@@ -30,7 +31,9 @@
 
 .EXAMPLE
     Запуск без скачивания (PowerShell от имени администратора):
-    [Net.ServicePointManager]::SecurityProtocol=3072; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1).TrimStart([char]0xFEFF))) -Action Status
+    irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
+    С параметром:
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1).TrimStart([char]0xFEFF))) -Action Status
 #>
 [CmdletBinding()]
 param(
@@ -511,6 +514,14 @@ function Test-IpOrCidr([string]$v) {
     $parts.Count -eq 1
 }
 
+# Запись белого списка: IP/CIDR, доменное имя или URL текстового списка адресов — всё это понимает сам IPBan.
+function Test-WhitelistEntry([string]$v) {
+    if ($v -match '^https?://[^|]+$') { return $true }
+    # Похоже на адрес — проверяем строго, иначе опечатка вроде 10.0.0.256 прошла бы как «домен»
+    if ($v -match '^[\d./]+$' -or $v -match ':') { return Test-IpOrCidr $v }
+    [Uri]::CheckHostName($v) -eq 'Dns'
+}
+
 function Menu-Whitelist($s) {
     while ($true) {
         Clear-Host
@@ -524,7 +535,7 @@ function Menu-Whitelist($s) {
 
   1) Вкл/выкл автоопределение частных сетей
   2) Вкл/выкл добавление текущих RDP-подключений
-  3) Добавить IP/подсеть вручную
+  3) Добавить IP/подсеть/домен/URL списка вручную
   4) Удалить из ручного списка
   5) Показать итоговый белый список
   0) Назад
@@ -533,11 +544,18 @@ function Menu-Whitelist($s) {
             '1' { $s.AutoNetworks = -not $s.AutoNetworks }
             '2' { $s.IncludeRdpPeers = -not $s.IncludeRdpPeers }
             '3' {
-                $v = (Read-Host "IP или CIDR (можно несколько через запятую)") -split '[,; ]+' | Where-Object { $_ }
+                $v = (Read-Host "IP, CIDR, домен или URL списка адресов (можно несколько через запятую)") -split '[,; ]+' | Where-Object { $_ }
+                $pause = $false
                 foreach ($x in $v) {
-                    if (Test-IpOrCidr $x) { $s.ExtraWhitelist = @($s.ExtraWhitelist + $x | Select-Object -Unique) }
-                    else { Write-Warn "Некорректно: $x"; Start-Sleep 1 }
+                    if (-not (Test-WhitelistEntry $x)) { Write-Warn "Некорректно: $x"; $pause = $true; continue }
+                    $s.ExtraWhitelist = @($s.ExtraWhitelist + $x | Select-Object -Unique)
+                    if ([Uri]::CheckHostName($x) -eq 'Dns') {
+                        $pause = $true
+                        try   { Write-Host "    $x сейчас -> $(([Net.Dns]::GetHostAddresses($x)).IPAddressToString -join ', ')" }
+                        catch { Write-Warn "$x сейчас не разрешается — добавлен, IPBan будет пробовать раз в 5 минут" }
+                    }
                 }
+                if ($pause) { Pause-Menu }
             }
             '4' {
                 $n = Read-Host "Номер"
