@@ -75,6 +75,54 @@ function Write-Ok($m)   { Write-Host "[ok] $m" -ForegroundColor Green }
 function Write-Warn($m) { Write-Host "[!] $m"  -ForegroundColor Yellow }
 function Pause-Menu     { [void](Read-Host "`nEnter — продолжить") }
 function Confirm-Yes($q) { (Read-Host "$q [y/N]") -match '^(y|д|yes|да)$' }
+
+# Меню со стрелками: ↑/↓, Home/End — выбор, Enter — выполнить, цифра — сразу пункт, Esc — пункт «0».
+# $Items — массив пар @('ключ','текст'); пара с пустым ключом — разделитель. Возвращает ключ.
+# Без настоящей консоли (ISE, Enter-PSSession, перенаправленный ввод) — ввод номера, как раньше.
+function Select-Menu($Items, [string]$Default) {
+    $keys = @($Items | ForEach-Object { $_[0] })
+    if ($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected) {
+        foreach ($it in $Items) { Write-Host $(if ($it[0]) { "  $($it[0])) $($it[1])" } else { "  $($it[1])" }) }
+        return Read-Host "`nВыбор"
+    }
+    $sel = @(for ($i = 0; $i -lt $keys.Count; $i++) { if ($keys[$i]) { $i } })
+    $pos = [array]::IndexOf($keys, $Default)
+    if ($pos -lt 0 -or -not $keys[$pos]) { $pos = $sel[0] }
+    $width = 4 + ($Items | ForEach-Object { "$($_[0])) $($_[1])".Length } | Measure-Object -Maximum).Maximum
+    $draw = {
+        for ($i = 0; $i -lt $Items.Count; $i++) {
+            $k, $t = $Items[$i]
+            if (-not $k)         { Write-Host "    $t".PadRight($width) -ForegroundColor DarkGray }
+            elseif ($i -eq $pos) { Write-Host "  > $k) $t".PadRight($width) -ForegroundColor Black -BackgroundColor Cyan }
+            else                 { Write-Host "    $k) $t".PadRight($width) }
+        }
+        Write-Host "`n  ↑↓ — выбор, Enter — выполнить, цифра — сразу пункт, Esc — назад" -ForegroundColor DarkGray
+    }
+    Write-Host ''
+    & $draw
+    $top = [Console]::CursorTop - $Items.Count - 2   # считаем после вывода: экран мог прокрутиться
+    $cursor = $null
+    try { $cursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch {}
+    try {
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            $n = [array]::IndexOf($sel, $pos)
+            switch ($key.Key) {
+                'UpArrow'   { $pos = $sel[($n - 1 + $sel.Count) % $sel.Count] }
+                'DownArrow' { $pos = $sel[($n + 1) % $sel.Count] }
+                'Home'      { $pos = $sel[0] }
+                'End'       { $pos = $sel[-1] }
+                'Enter'     { return $keys[$pos] }
+                'Escape'    { return '0' }
+                default     { if ($keys -contains [string]$key.KeyChar) { return [string]$key.KeyChar } }
+            }
+            [Console]::SetCursorPosition(0, [Math]::Max(0, $top))
+            & $draw
+        }
+    } finally {
+        if ($null -ne $cursor) { try { [Console]::CursorVisible = $cursor } catch {} }
+    }
+}
 #endregion
 
 #region ── Настройки менеджера ───────────────────────────────────────────────
@@ -532,6 +580,7 @@ function Test-WhitelistEntry([string]$v) {
 }
 
 function Menu-Whitelist($s) {
+    $c = $null
     while ($true) {
         Clear-Host
         Write-Host "Белый список`n" -ForegroundColor Cyan
@@ -540,16 +589,15 @@ function Menu-Whitelist($s) {
         Write-Host ("Текущие RDP-подключения: {0}   (добавлять: {1})" -f ((@(Get-RdpPeers) -join ', ')), ($(if ($s.IncludeRdpPeers) { 'да' } else { 'нет' })))
         Write-Host "`nРучной список:"
         if ($s.ExtraWhitelist.Count) { $i = 1; foreach ($e in $s.ExtraWhitelist) { Write-Host "  $i) $e"; $i++ } } else { Write-Host "  (пусто)" }
-        Write-Host @"
-
-  1) Вкл/выкл автоопределение частных сетей
-  2) Вкл/выкл добавление текущих RDP-подключений
-  3) Добавить IP/подсеть/домен/URL списка вручную
-  4) Удалить из ручного списка
-  5) Показать итоговый белый список
-  0) Назад
-"@
-        switch (Read-Host "Выбор") {
+        $c = Select-Menu @(
+            @('1', 'Вкл/выкл автоопределение частных сетей'),
+            @('2', 'Вкл/выкл добавление текущих RDP-подключений'),
+            @('3', 'Добавить IP/подсеть/домен/URL списка вручную'),
+            @('4', 'Удалить из ручного списка'),
+            @('5', 'Показать итоговый белый список'),
+            @('0', 'Назад')
+        ) $c
+        switch ($c) {
             '1' { $s.AutoNetworks = -not $s.AutoNetworks }
             '2' { $s.IncludeRdpPeers = -not $s.IncludeRdpPeers }
             '3' {
@@ -567,7 +615,13 @@ function Menu-Whitelist($s) {
                 if ($pause) { Pause-Menu }
             }
             '4' {
-                $n = Read-Host "Номер"
+                if (-not $s.ExtraWhitelist.Count) { break }
+                $items = @(); $i = 0
+                foreach ($e in $s.ExtraWhitelist) { $i++; $items += ,@("$i", $e) }
+                $items += ,@('0', 'Отмена')
+                Clear-Host
+                Write-Host "Удалить из ручного списка" -ForegroundColor Cyan
+                $n = Select-Menu $items
                 if ($n -match '^\d+$' -and [int]$n -ge 1 -and [int]$n -le $s.ExtraWhitelist.Count) {
                     $del = $s.ExtraWhitelist[[int]$n - 1]
                     $s.ExtraWhitelist = @($s.ExtraWhitelist | Where-Object { $_ -ne $del })
@@ -581,22 +635,25 @@ function Menu-Whitelist($s) {
 
 function Menu-Settings {
     $s = Get-Settings
+    $c = $null
     while ($true) {
         Clear-Host
-        Write-Host "Настройки IPBan`n" -ForegroundColor Cyan
-        Write-Host "  1) Попыток до бана:            $($s.Attempts)"
-        Write-Host "  2) Длительность бана:          $($s.BanTime)"
-        Write-Host "  3) Сброс счётчика попыток:     $($s.ExpireTime)"
-        Write-Host "  4) Белый список…               (ручных: $($s.ExtraWhitelist.Count), авто: $(if ($s.AutoNetworks) {'вкл'} else {'выкл'}))"
-        Write-Host "  5) Отправлять баны в глоб. базу DigitalRuby: $(if ($s.ShareBannedIPs) {'ДА'} else {'нет'})"
-        Write-Host "  ─────────────"
-        Write-Host "  6) Показать забаненные адреса"
-        Write-Host "  7) Разбанить IP"
-        Write-Host "  8) Последние строки лога"
-        Write-Host "  ─────────────"
-        Write-Host "  9) Сохранить и применить (перезапуск службы)"
-        Write-Host "  0) Назад без применения"
-        switch (Read-Host "`nВыбор") {
+        Write-Host "Настройки IPBan" -ForegroundColor Cyan
+        $c = Select-Menu @(
+            @('1', "Попыток до бана:            $($s.Attempts)"),
+            @('2', "Длительность бана:          $($s.BanTime)"),
+            @('3', "Сброс счётчика попыток:     $($s.ExpireTime)"),
+            @('4', "Белый список…               (ручных: $($s.ExtraWhitelist.Count), авто: $(if ($s.AutoNetworks) {'вкл'} else {'выкл'}))"),
+            @('5', "Отправлять баны в глоб. базу DigitalRuby: $(if ($s.ShareBannedIPs) {'ДА'} else {'нет'})"),
+            @('',  '─────────────'),
+            @('6', 'Показать забаненные адреса'),
+            @('7', 'Разбанить IP'),
+            @('8', 'Последние строки лога'),
+            @('',  '─────────────'),
+            @('9', 'Сохранить и применить (перезапуск службы)'),
+            @('0', 'Назад без применения')
+        ) $c
+        switch ($c) {
             '1' { $v = Read-Host "Попыток (1–100)"; if ($v -match '^\d+$' -and [int]$v -ge 1 -and [int]$v -le 100) { $s.Attempts = [int]$v } }
             '2' { $s.BanTime    = Read-Duration "Длительность бана" $s.BanTime }
             '3' { $s.ExpireTime = Read-Duration "Сброс счётчика"   $s.ExpireTime }
@@ -626,18 +683,20 @@ function Menu-Settings {
 
 #region ── Главное меню / точка входа ────────────────────────────────────────
 function Menu-Main {
+    $c = $null
     while ($true) {
         Clear-Host
         $ver = Get-InstalledVersion
         $tag = if (-not $ver) { 'не установлен' } elseif (Test-ForeignInstall) { "установлен $ver, чужая установка — настройки не импортированы" } elseif ((Load-Settings).Origin -eq 'adopted') { "установлен $ver, импортирован" } else { "установлен $ver" }
-        Write-Host "IPBan Manager   [$tag]`n" -ForegroundColor Cyan
-        Write-Host "  1) Установить"
-        Write-Host "  2) Обновить"
-        Write-Host "  3) Удалить"
-        Write-Host "  4) Настройки"
-        Write-Host "  5) Состояние"
-        Write-Host "  0) Выход"
-        $c = Read-Host "`nВыбор"
+        Write-Host "IPBan Manager   [$tag]" -ForegroundColor Cyan
+        $c = Select-Menu @(
+            @('1', 'Установить'),
+            @('2', 'Обновить'),
+            @('3', 'Удалить'),
+            @('4', 'Настройки'),
+            @('5', 'Состояние'),
+            @('0', 'Выход')
+        ) $c
         try {
             switch ($c) {
                 '1' { Install-IPBan;   Pause-Menu }

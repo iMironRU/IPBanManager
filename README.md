@@ -10,7 +10,9 @@ PowerShell **от имени администратора**:
 irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
 ```
 
-Откроется интерактивное меню. Без меню, сразу с действием:
+Откроется интерактивное меню: ↑/↓ — выбор, Enter — выполнить, цифра — сразу пункт, Esc — назад. В ISE и в `Enter-PSSession`, где клавиши не перехватить, пункт выбирается вводом номера.
+
+Без меню, сразу с действием:
 
 ```powershell
 iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"
