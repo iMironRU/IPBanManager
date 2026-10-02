@@ -1,0 +1,44 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'IPBan-Manager.ps1'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Сайт из docs/ плюс сам скрипт — чтобы его можно было скачать и с сайта
+      - name: Собрать сайт
+        run: |
+          mkdir _site
+          cp -r docs/. _site/
+          cp IPBan-Manager.ps1 _site/IPBan-Manager.ps1
+          cp IPBan-Manager.ps1 _site/ipban.txt
+          cp IPBan-Manager.ps1 _site/ipban
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

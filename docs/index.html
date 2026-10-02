@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPBanManager — защита RDP от подбора паролей на Windows в одно меню</title>
+<meta name="description" content="Менеджер IPBan для Windows-серверов: установка, обновление, белый список, забаненные адреса и разбан из одного меню. Запуск одной строкой PowerShell.">
+<meta property="og:title" content="IPBanManager">
+<meta property="og:description" content="Защита RDP от подбора паролей на Windows: IPBan ставится, обновляется и настраивается из одного меню.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://imiron.ru/IPBanManager/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%235ad4e6'/><path d='m11 16 3.5 3.5L21 13' stroke='%2304141a' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --bg-alt: #11161d;
+    --bg-card: #131920;
+    --border: #232b36;
+    --text: #c9d4e0;
+    --text-dim: #6b7889;
+    --text-bright: #eef2f6;
+    --cyan: #5ad4e6;
+    --green: #3fd67a;
+    --yellow: #e0b341;
+    --red: #f0665e;
+    --magenta: #d97ad4;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    font-size: 16px;
+  }
+  .mono { font-family: "SF Mono", "Cascadia Code", "Consolas", "Courier New", monospace; }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+  h1, h2, h3 { color: var(--text-bright); line-height: 1.25; margin: 0 0 .5em; }
+  h2 { font-size: 1.7rem; margin-top: 0; }
+  p { margin: 0 0 1em; }
+  code { color: var(--text-bright); }
+  section { padding: 64px 0; border-top: 1px solid var(--border); }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: .78rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .lead { color: var(--text-dim); max-width: 720px; }
+
+  /* ---------- Hero ---------- */
+  header.hero {
+    padding: 96px 24px 72px;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 700px 400px at 50% -10%, rgba(90,212,230,.10), transparent 65%),
+      radial-gradient(ellipse 500px 300px at 85% 10%, rgba(63,214,122,.06), transparent 60%);
+  }
+  header.hero .badge-row { margin-bottom: 28px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  header.hero .badge-row img { height: 20px; display: block; }
+  header.hero h1 { font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 14px; letter-spacing: -.02em; }
+  header.hero h1 .accent { color: var(--cyan); }
+  header.hero .tagline { font-size: 1.15rem; color: var(--text-dim); max-width: 640px; margin: 0 auto 32px; }
+  .hint { color: var(--text-dim); font-size: .85rem; margin: 0 auto 32px; max-width: 640px; }
+
+  /* ---------- One-liner ---------- */
+  .cmd {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 760px;
+    margin: 0 auto 12px;
+    padding: 8px 8px 8px 16px;
+    background: #05070a;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-align: left;
+  }
+  .cmd .prompt { color: var(--text-dim); user-select: none; flex: none; }
+  .cmd code { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-all; font-size: .88rem; padding: 6px 0; line-height: 1.5; }
+  .copy {
+    flex: none;
+    font: inherit;
+    font-size: .85rem;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .copy:hover { border-color: var(--cyan); color: var(--text-bright); }
+  .copy.done { border-color: var(--green); color: var(--green); }
+
+  .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: .95rem;
+    border: 1px solid transparent;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn-primary { background: var(--cyan); color: #04141a; }
+  .btn-primary:hover { background: #78e0ee; }
+  .btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
+  .btn-secondary:hover { border-color: var(--text-dim); }
+
+  /* ---------- Terminal mockup ---------- */
+  .terminal {
+    background: #05070a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,.6);
+    max-width: 720px;
+    margin: 32px auto 0;
+  }
+  .terminal .titlebar {
+    background: #0f1319;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .terminal .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .terminal .dot.r { background: #ff5f57; }
+  .terminal .dot.y { background: #febc2e; }
+  .terminal .dot.g { background: #28c840; }
+  .terminal .titlebar .fname { margin-left: 8px; font-size: .78rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .terminal pre { margin: 0; padding: 20px 22px; font-size: .82rem; line-height: 1.55; overflow-x: auto; white-space: pre; }
+  .t-cyan { color: var(--cyan); }
+  .t-green { color: var(--green); }
+  .t-yellow { color: var(--yellow); }
+  .t-red { color: var(--red); }
+  .t-dim { color: var(--text-dim); }
+  .t-white { color: var(--text-bright); }
+  .t-sel { background: var(--cyan); color: #04141a; }
+
+  /* ---------- Was / now ---------- */
+  .ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 32px; }
+  @media (max-width: 700px) { .ps-grid { grid-template-columns: 1fr; } }
+  .ps-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+  .ps-card h3 { font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+  .ps-card.problem h3::before { content: "✗"; color: var(--red); }
+  .ps-card.solution h3::before { content: "✓"; color: var(--green); }
+  .ps-card ul { margin: 0; padding-left: 1.2em; color: var(--text-dim); font-size: .93rem; }
+  .ps-card ul li { margin-bottom: 6px; }
+
+  /* ---------- Features ---------- */
+  .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 32px; }
+  @media (max-width: 860px) { .feat-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .feat-grid { grid-template-columns: 1fr; } }
+  .feat { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .feat .ico { color: var(--cyan); font-size: 1.2rem; line-height: 1; margin-bottom: 10px; }
+  .feat h3 { font-size: 1rem; margin-bottom: 6px; }
+  .feat p { color: var(--text-dim); font-size: .9rem; margin: 0; }
+
+  /* ---------- Tables ---------- */
+  .table-wrap { overflow-x: auto; margin-top: 28px; }
+  table.ref { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  table.ref th, table.ref td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.ref th { color: var(--text-dim); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  table.ref td:first-child { font-family: "SF Mono", Consolas, monospace; color: var(--cyan); white-space: nowrap; }
+  table.ref tr:last-child td { border-bottom: none; }
+  table.ref td { color: var(--text); }
+
+  /* ---------- Callouts ---------- */
+  .callout { border: 1px solid var(--border); border-left: 3px solid var(--yellow); background: var(--bg-card); border-radius: var(--radius); padding: 16px 20px; margin-top: 20px; font-size: .93rem; }
+  .callout.info { border-left-color: var(--cyan); }
+  .callout strong { color: var(--text-bright); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* ---------- Steps ---------- */
+  ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 32px 0 0; }
+  ol.steps li { counter-increment: step; position: relative; padding: 4px 0 20px 44px; color: var(--text-dim); font-size: .95rem; }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--cyan); font-weight: 700; font-size: .85rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps li strong { color: var(--text-bright); }
+  .inline-code, ol.steps li code, .callout code, table.ref td code, details p code {
+    background: var(--bg-alt); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; font-size: .88em;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- FAQ ---------- */
+  details { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); margin-top: 12px; }
+  details summary { cursor: pointer; padding: 14px 18px; color: var(--text-bright); font-weight: 600; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+"; color: var(--cyan); display: inline-block; width: 1.2em; font-family: monospace; }
+  details[open] summary::before { content: "−"; }
+  details .body { padding: 0 18px 16px 40px; color: var(--text-dim); font-size: .93rem; }
+  details .cmd { margin: 12px 0 4px; max-width: none; }
+
+  footer { padding: 40px 24px 60px; text-align: center; color: var(--text-dim); font-size: .85rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--text-dim); }
+  footer .sep { margin: 0 8px; opacity: .4; }
+
+  @media (max-width: 560px) {
+    header.hero { padding: 64px 16px 48px; }
+    .wrap { padding: 0 16px; }
+    section { padding: 48px 0; }
+    .cmd { flex-wrap: wrap; padding: 10px 12px; }
+    .cmd .prompt { display: none; }
+    .cmd code { flex-basis: 100%; }
+    .copy { width: 100%; }
+    details .body { padding-left: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="badge-row">
+    <img src="https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell 5.1+">
+    <img src="https://img.shields.io/badge/Windows%20Server-2016%2B-0078D4?style=flat-square" alt="Windows Server 2016+">
+    <img src="https://img.shields.io/github/license/iMironRU/IPBanManager?style=flat-square&color=8b949e" alt="license">
+  </div>
+  <h1>IPBan<span class="accent">Manager</span></h1>
+  <p class="tagline">Защита RDP от подбора паролей на Windows-сервере — IPBan ставится, обновляется и настраивается из одного меню, без ручной правки XML.</p>
+  <div class="cmd">
+    <span class="prompt mono">PS&gt;</span>
+    <code class="mono" id="cmd-main">irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex</code>
+    <button class="copy" type="button" data-copy="cmd-main">Копировать</button>
+  </div>
+  <p class="hint">Вставить в PowerShell, запущенный <strong>от имени администратора</strong>. Сам IPBan ставится только по пункту «Установить».</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="#start">Как начать</a>
+    <a class="btn btn-secondary" href="https://github.com/iMironRU/IPBanManager">Исходный код на GitHub</a>
+  </div>
+</header>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="terminal">
+      <div class="titlebar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="fname mono">Администратор: Windows PowerShell</span>
+      </div>
+      <pre class="mono"><span class="t-cyan">IPBan Manager   [установлен 4.1.0]</span>
+
+    1) Установить
+    2) Обновить
+    3) Удалить
+<span class="t-sel">  &gt; 4) Настройки        </span>
+    5) Состояние
+<span class="t-dim">    ─────────────</span>
+    6) Забаненные адреса
+    7) Разбанить IP
+    0) Выход
+
+<span class="t-dim">  ↑↓ — выбор, Enter — выполнить, цифра — сразу пункт, Esc — назад</span></pre>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <div class="eyebrow">Почему не просто IPBan</div>
+    <h2>IPBan отличный, но настраивать его неудобно</h2>
+    <p class="lead">IPBan от DigitalRuby следит за неудачными входами и банит адреса брандмауэром Windows. Всё управление — правка XML-конфига руками, и несколько типовых ловушек легко пропустить.</p>
+    <div class="ps-grid">
+      <div class="ps-card problem">
+        <h3>Вручную</h3>
+        <ul>
+          <li>Аудит неудачных входов выключен — IPBan молча ничего не видит</li>
+          <li>Путь службы без кавычек — уязвимость <i>unquoted service path</i></li>
+          <li>Белый список — длинная строка через запятую в XML</li>
+          <li>Непонятно, что изменится, пока не перезапустишь службу</li>
+          <li>Забаненные адреса — копаться в правилах брандмауэра</li>
+        </ul>
+      </div>
+      <div class="ps-card solution">
+        <h3>С менеджером</h3>
+        <ul>
+          <li>Аудит включается при установке, путь службы чинится сам</li>
+          <li>Настройки хранятся отдельно и переживают обновление IPBan</li>
+          <li>Белый список по источникам, с доменами и проверкой ввода</li>
+          <li>Изменения показываются заранее; отказались — ничего не сохранено</li>
+          <li>Забаненные и разбан — прямо в главном меню</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">Возможности</div>
+    <h2>Что умеет</h2>
+    <div class="feat-grid">
+      <div class="feat"><div class="ico">⤓</div><h3>Установка в один пункт</h3><p>Официальный установщик DigitalRuby, аудит входов, кавычки в пути службы, проверка конкурентов — RdpGuard, EvlWatcher, wail2ban и др.</p></div>
+      <div class="feat"><div class="ico">↻</div><h3>Обновление без потерь</h3><p>Конфиг копируется перед обновлением, а настройки менеджера накатываются на новый конфиг после.</p></div>
+      <div class="feat"><div class="ico">⊘</div><h3>Забаненные и разбан</h3><p>Список колонками по порядку. Разбан нескольких адресов с ожиданием, пока служба действительно снимет бан.</p></div>
+      <div class="feat"><div class="ico">✓</div><h3>Белый список</h3><p>Частные сети сервера, активные RDP-сессии, свои IP, подсети, домены и URL списков.</p></div>
+      <div class="feat"><div class="ico">±</div><h3>Видно до применения</h3><p><code class="mono">да → нет</code>, <code class="mono">+ добавится</code>, <code class="mono">- уйдёт</code>. Подтверждение перед записью конфига.</p></div>
+      <div class="feat"><div class="ico">⌨</div><h3>Меню стрелками</h3><p>↑/↓ и Enter, цифра — сразу пункт, Esc — назад. В ISE и PSSession — ввод номера.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="whitelist">
+  <div class="wrap">
+    <div class="eyebrow">Белый список</div>
+    <h2>Четыре источника — и видно каждый</h2>
+    <div class="table-wrap">
+      <table class="ref">
+        <thead><tr><th>Источник</th><th>Что попадает</th></tr></thead>
+        <tbody>
+          <tr><td>loopback</td><td><code class="mono">127.0.0.1</code>, <code class="mono">::1</code></td></tr>
+          <tr><td>сети</td><td>Частные подсети сервера (RFC 1918, CGNAT). Публичный адрес — только сам <code class="mono">/32</code>, чтобы не открыть соседей по хостингу</td></tr>
+          <tr><td>RDP</td><td>Клиенты <strong>активных сессий с вошедшим пользователем</strong> — чтобы не забанить себя</td></tr>
+          <tr><td>ручной</td><td>IP, подсети, доменные имена, URL текстового списка адресов</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:24px">Перед применением менеджер показывает, что изменится в конфиге:</p>
+    <div class="terminal">
+      <div class="titlebar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="fname mono">Настройки → 9) Сохранить и применить</span>
+      </div>
+      <pre class="mono"><span class="t-cyan">==&gt; Что изменится в ipban.config:</span>
+<span class="t-white">    Попыток до бана:  </span><span class="t-dim">5</span>  →  <span class="t-green">3</span>
+<span class="t-white">    Белый список: сейчас 5, станет 6  (+2 / -1)</span>
+<span class="t-cyan">      loopback</span>
+        = 127.0.0.1   = ::1
+<span class="t-cyan">      сети интерфейсов</span>
+        = 192.168.10.0/24
+<span class="t-cyan">      RDP-сессии</span>
+<span class="t-green">        + 203.0.113.7 (SRV01\admin)</span>
+<span class="t-cyan">      ручной список</span>
+        = wl.example.ru   <span class="t-green">+ 198.51.100.0/24</span>
+<span class="t-cyan">      уйдут из списка</span>
+<span class="t-red">        - 192.0.2.44</span>
+<span class="t-dim">      + добавится   - уйдёт   = останется</span>
+Применить? [y/N]: <span class="t-white">_</span></pre>
+    </div>
+    <div class="callout">
+      <p><strong>Домен для динамического IP.</strong> Заведите, например, <code class="mono">wl.example.ru</code> с A-записями на все свои адреса и добавьте имя в список. IPBan сам перечитывает имена и URL раз в 5 минут.</p>
+      <p><strong>Но помните:</strong> белый список IPBan — это разрешающее правило брандмауэра на все порты. Кто может изменить DNS-запись из списка, тот может открыть себе сервер. Закройте DNS-аккаунт 2FA, а постоянный IP добавьте ещё и напрямую.</p>
+    </div>
+    <div class="callout info">
+      <p>RDP-адреса берутся только у активных сессий, где пользователь вошёл. Просто открытые соединения на порт RDP не берутся: среди них боты, подбирающие пароль.</p>
+    </div>
+  </div>
+</section>
+
+<section id="menu">
+  <div class="wrap">
+    <div class="eyebrow">Полное меню</div>
+    <h2>Пункты</h2>
+    <div class="table-wrap">
+      <table class="ref">
+        <thead><tr><th>Пункт</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr><td>1 Установить</td><td>Аудит входов → официальный установщик → кавычки в пути службы → применение настроек</td></tr>
+          <tr><td>2 Обновить</td><td>Копия конфига → последний релиз → настройки поверх нового конфига</td></tr>
+          <tr><td>3 Удалить</td><td>Служба, правила брандмауэра IPBan (баны снимаются), каталог; копия конфига остаётся</td></tr>
+          <tr><td>4 Настройки</td><td>Попыток до бана, длительность бана, сброс счётчика, белый список, отправка банов в глобальную базу DigitalRuby, лог службы, «Сохранить и применить»</td></tr>
+          <tr><td>5 Состояние</td><td>Версия и последний релиз, служба, число банов, брандмауэр, аудит, конкуренты, проблемы конфигурации</td></tr>
+          <tr><td>6 Забаненные</td><td>Все адреса из правил брандмауэра IPBan, по порядку, колонками</td></tr>
+          <tr><td>7 Разбанить</td><td>Один или несколько адресов, с ожиданием снятия бана и предложением добавить в белый список</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:20px" class="lead">Время бана вводится по-человечески: <code class="mono inline-code">30m</code>, <code class="mono inline-code">12h</code>, <code class="mono inline-code">1d</code>, <code class="mono inline-code">7d</code>.</p>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="eyebrow">Быстрый старт</div>
+    <h2>Первый запуск</h2>
+    <ol class="steps">
+      <li>Открыть <strong>PowerShell от имени администратора</strong> на сервере.</li>
+      <li>Вставить строку запуска сверху страницы — откроется меню.</li>
+      <li><strong>1) Установить</strong> — поставит IPBan и применит настройки по умолчанию: 5 попыток, бан на сутки.</li>
+      <li><strong>4) Настройки → Белый список</strong> — добавить свои IP или домен, затем <strong>9) Сохранить и применить</strong>.</li>
+      <li><strong>5) Состояние</strong> — убедиться, что служба работает, брандмауэр включён, а аудит неудачных входов включён.</li>
+    </ol>
+  </div>
+</section>
+
+<section id="automation">
+  <div class="wrap">
+    <div class="eyebrow">Без меню</div>
+    <h2>Автоматизация</h2>
+    <p class="lead">Для развёртывания на нескольких серверах — сразу нужное действие:</p>
+    <div class="cmd" style="margin:20px 0 0;max-width:none">
+      <code class="mono" id="cmd-action">iex "&amp; {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"</code>
+      <button class="copy" type="button" data-copy="cmd-action">Копировать</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ref">
+        <thead><tr><th>-Action</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr><td>Install</td><td>Установить и применить сохранённые настройки</td></tr>
+          <tr><td>Update</td><td>Обновить до последнего релиза, настройки сохраняются</td></tr>
+          <tr><td>Uninstall</td><td>Удалить службу, правила брандмауэра, каталог</td></tr>
+          <tr><td>Apply</td><td>Применить сохранённые настройки и перезапустить службу</td></tr>
+          <tr><td>Status</td><td>Вывести состояние</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="eyebrow">Частые вопросы</div>
+    <h2>Если что-то не так</h2>
+    <details>
+      <summary>«Could not create SSL/TLS secure channel» при запуске</summary>
+      <div class="body">
+        <p>Старые системы (Server 2016 / 2012 R2) по умолчанию не включают TLS 1.2. Допишите в начало строки:</p>
+        <div class="cmd">
+          <code class="mono" id="cmd-tls">[Net.ServicePointManager]::SecurityProtocol=3072; irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex</code>
+          <button class="copy" type="button" data-copy="cmd-tls">Копировать</button>
+        </div>
+      </div>
+    </details>
+    <details>
+      <summary>Кракозябры вместо русского при запуске скачанного файла</summary>
+      <div class="body">
+        <p>Файл хранится в UTF-8 без BOM — иначе не работал бы <code>irm | iex</code>. Windows PowerShell 5.1 читает такие файлы как ANSI, поэтому локально запускайте так:</p>
+        <div class="cmd">
+          <code class="mono" id="cmd-local">iex (Get-Content .\IPBan-Manager.ps1 -Raw -Encoding UTF8)</code>
+          <button class="copy" type="button" data-copy="cmd-local">Копировать</button>
+        </div>
+      </div>
+    </details>
+    <details>
+      <summary>Стрелки не работают</summary>
+      <div class="body"><p>В PowerShell ISE и в удалённой сессии <code>Enter-PSSession</code> клавиши не перехватить — там пункт выбирается вводом номера. В обычной консоли и Windows Terminal работают стрелки.</p></div>
+    </details>
+    <details>
+      <summary>IPBan уже стоит — менеджер что-то сломает?</summary>
+      <div class="body"><p>Нет. Перед первым изменением он импортирует текущие значения как есть, а автоопределение сетей и RDP выключает, чтобы поведение не изменилось. Любое изменение конфига показывается заранее и требует подтверждения.</p></div>
+    </details>
+    <details>
+      <summary>Где хранятся настройки и копии конфига</summary>
+      <div class="body"><p>Настройки менеджера — <code>%ProgramData%\IPBanManager\settings.json</code>, там же копии конфига перед обновлением и при удалении. Перед каждым изменением рядом с <code>ipban.config</code> делается <code>.bak_*</code>, хранятся последние 5.</p></div>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <a href="https://github.com/iMironRU/IPBanManager">GitHub</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/iMironRU/IPBanManager/blob/main/README.md">README</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/DigitalRuby/IPBan">IPBan (DigitalRuby)</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/iMironRU/IPBanManager/blob/main/LICENSE">MIT License</a>
+</footer>
+
+<script>
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var el = document.getElementById(btn.dataset.copy);
+      var text = el.textContent.trim();
+      var done = function () {
+        btn.textContent = 'Скопировано';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = 'Копировать'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () { fallback(el); done(); });
+      } else { fallback(el); done(); }
+    });
+  });
+  function fallback(el) {
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    var s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    try { document.execCommand('copy'); } catch (e) {}
+    s.removeAllRanges();
+  }
+</script>
+</body>
+</html>
