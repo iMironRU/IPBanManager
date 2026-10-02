@@ -483,7 +483,43 @@ function Get-BannedIPs {
     Get-NetFirewallRule -DisplayName 'IPBan*Block*' -ErrorAction SilentlyContinue |
         Get-NetFirewallAddressFilter |
         ForEach-Object { $_.RemoteAddress } |
-        Where-Object { $_ -and $_ -ne 'Any' }
+        Where-Object { $_ -and $_ -ne 'Any' } |
+        Sort-Object { if ($_ -match '^(\d+)\.(\d+)\.(\d+)\.(\d+)') { '0' + (@($Matches[1], $Matches[2], $Matches[3], $Matches[4] | ForEach-Object { $_.PadLeft(3, '0') }) -join '.') + $_ } else { "1$_" } } -Unique
+}
+
+function Show-Banned {
+    $b = @(Get-BannedIPs)
+    if (-not $b) { Write-Ok "Забаненных адресов нет"; return }
+    Write-Step "Забанено адресов: $($b.Count)"
+    Write-Columns $b 4
+}
+
+# Разбан через unban.txt: служба читает его каждый цикл (~15 с). Ждём, пока адреса пропадут из правил.
+function Invoke-Unban {
+    if (-not (Get-Service $ServiceName -ErrorAction SilentlyContinue)) { Write-Warn "IPBan не установлен"; return }
+    $banned = @(Get-BannedIPs)
+    if ($banned.Count -le 60) { Show-Banned } else { Write-Host "Забанено адресов: $($banned.Count) — весь список в пункте «Забаненные адреса»" }
+    $ips = @((Read-Host "`nIP для разбана (можно несколько через запятую, пусто — отмена)") -split '[,; ]+' | Where-Object { $_ })
+    $ips = @($ips | Where-Object { if (Test-IpOrCidr $_) { $true } else { Write-Warn "Некорректный IP: $_"; $false } })
+    if (-not $ips) { return }
+    foreach ($ip in $ips) { if ($ip -notin $banned) { Write-Warn "$ip сейчас не в бане — всё равно передаю службе" } }
+    Add-Content (Join-Path (Get-IPBanDir) 'unban.txt') $ips
+    Write-Step "Передано службе, жду снятия бана (до 30 с)…"
+    $left = @($ips | Where-Object { $_ -in $banned })
+    for ($t = 0; $t -lt 30 -and $left; $t += 3) {
+        Start-Sleep 3
+        $now = @(Get-BannedIPs)
+        $left = @($left | Where-Object { $_ -in $now })
+    }
+    if ($left) { Write-Warn "Всё ещё в бане: $($left -join ', ') — проверьте лог службы (Настройки → Последние строки лога)" }
+    else       { Write-Ok "Разбанено: $($ips -join ', ')" }
+    if (Confirm-Yes "Добавить в белый список, чтобы не забанило снова?") {
+        $s = Get-Settings
+        $s.ExtraWhitelist = @(@($s.ExtraWhitelist) + $ips | Select-Object -Unique)
+        Save-Settings $s
+        Repair-ServicePath
+        Apply-Settings $s
+    }
 }
 
 function Show-Status {
@@ -772,9 +808,7 @@ function Menu-Settings {
             @('4', "Белый список…               (ручных: $($s.ExtraWhitelist.Count), авто: $(if ($s.AutoNetworks) {'вкл'} else {'выкл'}))"),
             @('5', "Отправлять баны в глоб. базу DigitalRuby: $(if ($s.ShareBannedIPs) {'ДА'} else {'нет'})"),
             @('',  '─────────────'),
-            @('6', 'Показать забаненные адреса'),
-            @('7', 'Разбанить IP'),
-            @('8', 'Последние строки лога'),
+            @('6', 'Последние строки лога'),
             @('',  '─────────────'),
             @('9', 'Сохранить и применить (перезапуск службы)'),
             @('0', 'Назад без применения')
@@ -785,17 +819,7 @@ function Menu-Settings {
             '3' { $s.ExpireTime = Read-Duration "Сброс счётчика"   $s.ExpireTime }
             '4' { Menu-Whitelist $s }
             '5' { $s.ShareBannedIPs = -not $s.ShareBannedIPs }
-            '6' { $b = @(Get-BannedIPs); Write-Host "Всего: $($b.Count)"; Write-Columns $b 2; Pause-Menu }
-            '7' {
-                $ip = Read-Host "IP для разбана"
-                if (Test-IpOrCidr $ip) {
-                    Add-Content (Join-Path (Get-IPBanDir) 'unban.txt') $ip
-                    Write-Ok "Добавлен в unban.txt — служба снимет бан в течение нескольких секунд"
-                    if (Confirm-Yes "Добавить его ещё и в белый список?") { $s.ExtraWhitelist = @($s.ExtraWhitelist + $ip | Select-Object -Unique) }
-                } else { Write-Warn "Некорректный IP" }
-                Pause-Menu
-            }
-            '8' {
+            '6' {
                 $log = Join-Path (Get-IPBanDir) 'logfile.txt'
                 if (Test-Path $log) { Get-Content $log -Tail 40 | Out-Host } else { Write-Warn "Лог не найден: $log" }
                 Pause-Menu
@@ -821,6 +845,9 @@ function Menu-Main {
             @('3', 'Удалить'),
             @('4', 'Настройки'),
             @('5', 'Состояние'),
+            @('',  '─────────────'),
+            @('6', 'Забаненные адреса'),
+            @('7', 'Разбанить IP'),
             @('0', 'Выход')
         ) $c
         try {
@@ -830,6 +857,8 @@ function Menu-Main {
                 '3' { Uninstall-IPBan; Pause-Menu }
                 '4' { Menu-Settings }
                 '5' { Show-Status;     Pause-Menu }
+                '6' { Show-Banned;     Pause-Menu }
+                '7' { Invoke-Unban;    Pause-Menu }
                 '0' { return }
             }
         } catch { Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red; Pause-Menu }
