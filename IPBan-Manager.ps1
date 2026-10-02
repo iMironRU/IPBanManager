@@ -516,9 +516,8 @@ function Invoke-Unban {
     if (Confirm-Yes "Добавить в белый список, чтобы не забанило снова?") {
         $s = Get-Settings
         $s.ExtraWhitelist = @(@($s.ExtraWhitelist) + $ips | Select-Object -Unique)
-        Save-Settings $s
         Repair-ServicePath
-        Apply-Settings $s
+        if (-not (Apply-Settings $s -Save)) { Write-Warn "В белый список не добавлены" }
     }
 }
 
@@ -553,7 +552,9 @@ function Enable-LogonAudit {
     Write-Ok "Аудит неудачных входов включён"
 }
 
-function Apply-Settings($s, [switch]$NoConfirm) {
+# Возвращает $true, если применено (или менять нечего), $false — если пользователь отказался.
+# -Save: сохранить настройки менеджера, но только после подтверждения — при отказе ничего не сохраняется.
+function Apply-Settings($s, [switch]$NoConfirm, [switch]$Save) {
     $cfg = Get-ConfigPath
     if (-not (Test-Path $cfg)) { throw "Не найден $cfg — IPBan не установлен?" }
 
@@ -581,7 +582,11 @@ function Apply-Settings($s, [switch]$NoConfirm) {
             ($a -join ',') -ne ($b -join ',')
         } else { [string]$old[$_] -ne [string]$values[$_] }
     })
-    if (-not $changes) { Write-Ok "Изменений нет — конфиг не трогаю"; return }
+    if (-not $changes) {
+        Write-Ok "Изменений нет — конфиг не трогаю"
+        if ($Save) { Save-Settings $s }
+        return $true
+    }
     Write-Step "Что изменится в $(Split-Path $cfg -Leaf):"
     foreach ($k in $changes) {
         if ($k -eq 'Whitelist') { continue }
@@ -594,7 +599,8 @@ function Apply-Settings($s, [switch]$NoConfirm) {
         Write-Host $to -ForegroundColor Green
     }
     if ($changes -contains 'Whitelist') { Show-WhitelistDiff $old.Whitelist $wl }
-    if ($Action -eq 'Menu' -and -not $NoConfirm -and -not (Confirm-Yes "Применить?")) { Write-Warn "Отменено"; return }
+    if ($Action -eq 'Menu' -and -not $NoConfirm -and -not (Confirm-Yes "Применить?")) { Write-Warn "Отменено"; return $false }
+    if ($Save) { Save-Settings $s }
 
     # Пишем в основной конфиг и в override (если он есть и содержит ключ) — иначе override перебьёт
     foreach ($f in @($cfg, (Get-OverridePath))) {
@@ -612,6 +618,7 @@ function Apply-Settings($s, [switch]$NoConfirm) {
     }
 
     Restart-IPBan
+    $true
 }
 
 function Restart-IPBan {
@@ -652,7 +659,7 @@ function Install-IPBan {
     Repair-ServicePath
     $s = Load-Settings
     if (-not (Test-Path $SettingsPath)) { Save-Settings $s }
-    Apply-Settings $s -NoConfirm   # свежая установка — применяем без вопросов
+    [void](Apply-Settings $s -NoConfirm)   # свежая установка — применяем без вопросов
     Write-Ok "Установлено: $(Get-InstalledVersion)"
 }
 
@@ -673,7 +680,7 @@ function Update-IPBan {
     Invoke-OfficialInstaller
     Repair-ServicePath
     # Конфиг мог быть заменён свежим из релиза — накатываем наши настройки поверх нового формата.
-    Apply-Settings $s
+    [void](Apply-Settings $s)
     Write-Ok "Обновлено: $cur -> $(Get-InstalledVersion)"
 }
 
@@ -824,7 +831,15 @@ function Menu-Settings {
                 if (Test-Path $log) { Get-Content $log -Tail 40 | Out-Host } else { Write-Warn "Лог не найден: $log" }
                 Pause-Menu
             }
-            '9' { Save-Settings $s; if (Get-Service $ServiceName -ErrorAction SilentlyContinue) { Repair-ServicePath; Apply-Settings $s } else { Write-Warn "IPBan не установлен — настройки применятся при установке" }; Pause-Menu; return }
+            '9' {
+                if (-not (Get-Service $ServiceName -ErrorAction SilentlyContinue)) {
+                    Save-Settings $s; Write-Warn "IPBan не установлен — настройки применятся при установке"; Pause-Menu; return
+                }
+                Repair-ServicePath
+                if (Apply-Settings $s -Save) { Pause-Menu; return }
+                Write-Warn "Не сохранено. Правки остались в этом меню — можно поправить или выйти через «0» без сохранения"
+                Pause-Menu
+            }
             '0' { return }
         }
     }
@@ -873,7 +888,7 @@ switch ($Action) {
     'Install'   { Install-IPBan }
     'Update'    { Update-IPBan }
     'Uninstall' { Uninstall-IPBan }
-    'Apply'     { Repair-ServicePath; Apply-Settings (Get-Settings) }
+    'Apply'     { Repair-ServicePath; [void](Apply-Settings (Get-Settings)) }
     'Status'    { Show-Status }
 }
 #endregion
