@@ -7,21 +7,13 @@
 PowerShell **от имени администратора**:
 
 ```powershell
-irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
+irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
 ```
 
-Откроется интерактивное меню.
-
-На Windows Server 2016 / 2012 R2, если `irm` пишет «Could not create SSL/TLS secure channel», сначала включите TLS 1.2:
+Откроется интерактивное меню. Без меню, сразу с действием:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol=3072; irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
-```
-
-### С параметром (без меню)
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1).TrimStart([char]0xFEFF))) -Action Status
+iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"
 ```
 
 | Действие    | Что делает |
@@ -32,7 +24,7 @@ irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
 | `Apply`     | применить сохранённые настройки к `ipban.config` и перезапустить службу |
 | `Status`    | вывести состояние |
 
-`IPBan-Manager.ps1` хранится в UTF-8 с BOM — без него Windows PowerShell 5.1 ломает кириллицу при локальном запуске. Но `iex` не разбирает текст с BOM, поэтому короткая строка идёт через `run.ps1`: маленький загрузчик без BOM, который скачивает основной скрипт и срезает BOM.
+На Windows Server 2016 / 2012 R2, если `irm` пишет «Could not create SSL/TLS secure channel», допишите в начало строки `[Net.ServicePointManager]::SecurityProtocol=3072;`.
 
 ## Белый список
 
@@ -45,9 +37,12 @@ irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
 
 ## Локальный запуск
 
+Файл хранится в UTF-8 **без BOM** — иначе не сработал бы `irm | iex`. Поэтому Windows PowerShell 5.1 прочитает кириллицу неверно, если запустить файл как обычно. Запускайте так:
+
 ```powershell
-.\IPBan-Manager.ps1
-.\IPBan-Manager.ps1 -Action Install
+iex (Get-Content .\IPBan-Manager.ps1 -Raw -Encoding UTF8)
 ```
+
+В PowerShell 7 работает обычный `.\IPBan-Manager.ps1 -Action Install`.
 
 Настройки менеджера хранятся в `%ProgramData%\IPBanManager\settings.json` и переживают обновление IPBan.

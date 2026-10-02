@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Менеджер IPBan (DigitalRuby) для Windows: установка, обновление, удаление, настройки.
 
@@ -31,9 +31,15 @@
 
 .EXAMPLE
     Запуск без скачивания (PowerShell от имени администратора):
-    irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/run.ps1 | iex
+    irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
     С параметром:
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1).TrimStart([char]0xFEFF))) -Action Status
+    iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"
+
+.NOTES
+    Файл хранится в UTF-8 БЕЗ BOM: iex не разбирает текст, начинающийся с BOM.
+    Поэтому локально в Windows PowerShell 5.1 запускать так (иначе кириллица прочитается как ANSI):
+    iex (Get-Content .\IPBan-Manager.ps1 -Raw -Encoding UTF8)
+    В PowerShell 7 работает обычный .\IPBan-Manager.ps1
 #>
 [CmdletBinding()]
 param(
@@ -41,12 +47,15 @@ param(
     [string]$Action = 'Menu'
 )
 
-# Вместо #Requires: при запуске через scriptblock (irm | iex) он не срабатывает.
-# Скрипт не использует $script: — в scriptblock это глобальная область, а не скрипт.
+# Вместо #Requires: при запуске через irm | iex он не срабатывает.
+# Скрипт не использует $script: — вне файла это глобальная область, а не скрипт.
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Нужны права администратора: запустите PowerShell от имени администратора.'
 }
 
+# Тело — в дочерней области: iex выполняет код прямо в области консоли, и без этого
+# $ErrorActionPreference = 'Stop' и все функции остались бы в сессии пользователя.
+& {
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -654,3 +663,4 @@ switch ($Action) {
     'Status'    { Show-Status }
 }
 #endregion
+}
