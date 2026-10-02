@@ -239,7 +239,7 @@
   <p class="tagline">Защита RDP от подбора паролей на Windows-сервере — IPBan ставится, обновляется и настраивается из одного меню, без ручной правки XML.</p>
   <div class="cmd">
     <span class="prompt mono">PS&gt;</span>
-    <code class="mono" id="cmd-main">irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex</code>
+    <code class="mono" id="cmd-main">irm https://imiron.ru/IPBanManager/ipban.txt | iex</code>
     <button class="copy" type="button" data-copy="cmd-main">Копировать</button>
   </div>
   <p class="hint">Вставить в PowerShell, запущенный <strong>от имени администратора</strong>. Сам IPBan ставится только по пункту «Установить».</p>
@@ -407,7 +407,7 @@
     <h2>Автоматизация</h2>
     <p class="lead">Для развёртывания на нескольких серверах — сразу нужное действие:</p>
     <div class="cmd" style="margin:20px 0 0;max-width:none">
-      <code class="mono" id="cmd-action">iex "&amp; {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"</code>
+      <code class="mono" id="cmd-action">iex "&amp; {$(irm https://imiron.ru/IPBanManager/ipban.txt)} -Action Status"</code>
       <button class="copy" type="button" data-copy="cmd-action">Копировать</button>
     </div>
     <div class="table-wrap">
@@ -434,7 +434,7 @@
       <div class="body">
         <p>Старые системы (Server 2016 / 2012 R2) по умолчанию не включают TLS 1.2. Допишите в начало строки:</p>
         <div class="cmd">
-          <code class="mono" id="cmd-tls">[Net.ServicePointManager]::SecurityProtocol=3072; irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex</code>
+          <code class="mono" id="cmd-tls">[Net.ServicePointManager]::SecurityProtocol=3072; irm https://imiron.ru/IPBanManager/ipban.txt | iex</code>
           <button class="copy" type="button" data-copy="cmd-tls">Копировать</button>
         </div>
       </div>
@@ -446,6 +446,16 @@
         <div class="cmd">
           <code class="mono" id="cmd-local">iex (Get-Content .\IPBan-Manager.ps1 -Raw -Encoding UTF8)</code>
           <button class="copy" type="button" data-copy="cmd-local">Копировать</button>
+        </div>
+      </div>
+    </details>
+    <details>
+      <summary>Почему ссылка на .txt, а не на .ps1</summary>
+      <div class="body">
+        <p>GitHub Pages отдаёт <code>.ps1</code> без кодировки, и Windows PowerShell 5.1 прочитал бы русский текст как Latin-1. <code>.txt</code> приходит с <code>charset=utf-8</code>. Внутри — тот же <code>IPBan-Manager.ps1</code>, сайт собирается из репозитория при каждом изменении скрипта. Запасной вариант — напрямую с GitHub:</p>
+        <div class="cmd">
+          <code class="mono" id="cmd-raw">irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex</code>
+          <button class="copy" type="button" data-copy="cmd-raw">Копировать</button>
         </div>
       </div>
     </details>
@@ -468,6 +478,8 @@
   <a href="https://github.com/iMironRU/IPBanManager">GitHub</a>
   <span class="sep">·</span>
   <a href="https://github.com/iMironRU/IPBanManager/blob/main/README.md">README</a>
+  <span class="sep">·</span>
+  <a href="IPBan-Manager.ps1" download>Скачать .ps1</a>
   <span class="sep">·</span>
   <a href="https://github.com/DigitalRuby/IPBan">IPBan (DigitalRuby)</a>
   <span class="sep">·</span>

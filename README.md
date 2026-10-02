@@ -10,10 +10,12 @@
 Менеджер [IPBan](https://github.com/DigitalRuby/IPBan) для Windows-серверов. IPBan следит за неудачными входами (RDP, SMB, SQL Server и др.) и банит адреса через брандмауэр Windows — а этот скрипт ставит, обновляет и настраивает его из одного меню, без ручной правки XML.
 
 ```powershell
-irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
+irm https://imiron.ru/IPBanManager/ipban.txt | iex
 ```
 
 <sub>Вставить в PowerShell, запущенный **от имени администратора**. Ничего не устанавливается, кроме самого IPBan — и то только по пункту «Установить».</sub>
+
+<sub>Запасной вариант — напрямую с GitHub: `irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex`</sub>
 
 ## Содержание
 
@@ -87,7 +89,7 @@ IPBan Manager   [установлен 4.1.0]
 ## Без меню: автоматизация
 
 ```powershell
-iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"
+iex "& {$(irm https://imiron.ru/IPBanManager/ipban.txt)} -Action Status"
 ```
 
 | `-Action`   | Что делает |
@@ -116,7 +118,7 @@ iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan
 - Windows Server 2016 / Windows 10 и новее (ограничение самого IPBan)
 - Windows PowerShell 5.1 или PowerShell 7
 - права администратора
-- доступ к GitHub с сервера
+- доступ с сервера к `imiron.ru` (скрипт) и GitHub (релизы IPBan)
 
 ## Частые вопросы
 
@@ -126,7 +128,7 @@ iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan
 Старые системы (Server 2016 / 2012 R2) по умолчанию не включают TLS 1.2. Допишите в начало строки:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol=3072; irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
+[Net.ServicePointManager]::SecurityProtocol=3072; irm https://imiron.ru/IPBanManager/ipban.txt | iex
 ```
 </details>
 
@@ -140,6 +142,12 @@ iex (Get-Content .\IPBan-Manager.ps1 -Raw -Encoding UTF8)
 ```
 
 В PowerShell 7 работает обычный `.\IPBan-Manager.ps1`.
+</details>
+
+<details>
+<summary><b>Почему ссылка на <code>.txt</code>, а не на <code>.ps1</code></b></summary>
+
+GitHub Pages отдаёт `.ps1` как `application/octet-stream` без кодировки, и Windows PowerShell 5.1 прочитал бы русский текст как Latin-1. `.txt` приходит с `charset=utf-8`. Внутри — тот же `IPBan-Manager.ps1`, сайт собирается из репозитория при каждом изменении скрипта. Скачать файл как есть: [IPBan-Manager.ps1](https://imiron.ru/IPBanManager/IPBan-Manager.ps1).
 </details>
 
 <details>

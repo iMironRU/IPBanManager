@@ -27,14 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Сайт из docs/ плюс сам скрипт — чтобы его можно было скачать и с сайта
+      # Сайт из docs/ плюс сам скрипт: для скачивания и для короткой строки запуска
       - name: Собрать сайт
         run: |
           mkdir _site
           cp -r docs/. _site/
           cp IPBan-Manager.ps1 _site/IPBan-Manager.ps1
+          # Строка запуска берёт .txt: Pages отдаёт его с charset=utf-8, а .ps1 — без кодировки,
+          # и Windows PowerShell 5.1 прочитал бы кириллицу как Latin-1
           cp IPBan-Manager.ps1 _site/ipban.txt
-          cp IPBan-Manager.ps1 _site/ipban
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

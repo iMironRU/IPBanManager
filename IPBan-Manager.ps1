@@ -32,9 +32,9 @@
 
 .EXAMPLE
     Запуск без скачивания (PowerShell от имени администратора):
-    irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1 | iex
+    irm https://imiron.ru/IPBanManager/ipban.txt | iex
     С параметром:
-    iex "& {$(irm https://raw.githubusercontent.com/iMironRU/IPBanManager/main/IPBan-Manager.ps1)} -Action Status"
+    iex "& {$(irm https://imiron.ru/IPBanManager/ipban.txt)} -Action Status"
 
 .NOTES
     Файл хранится в UTF-8 БЕЗ BOM: iex не разбирает текст, начинающийся с BOM.
