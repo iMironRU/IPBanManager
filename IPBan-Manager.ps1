@@ -22,7 +22,8 @@
            чтобы не открыть соседей по хостингу;
         3) ручной список (админские IP, офисы, VPN): IP, подсети, доменные имена
            и URL текстовых списков адресов — имена и URL IPBan перечитывает раз в 5 минут.
-    Плюс по запросу — адреса текущих RDP-подключений (чтобы не забанить себя).
+    Плюс по запросу — адреса клиентов активных RDP-сессий с вошедшим пользователем (чтобы не забанить себя);
+    просто открытые соединения на порт RDP не берутся — среди них боты, подбирающие пароль.
 
 .EXAMPLE
     .\IPBan-Manager.ps1
@@ -75,6 +76,28 @@ function Write-Ok($m)   { Write-Host "[ok] $m" -ForegroundColor Green }
 function Write-Warn($m) { Write-Host "[!] $m"  -ForegroundColor Yellow }
 function Pause-Menu     { [void](Read-Host "`nEnter — продолжить") }
 function Confirm-Yes($q) { (Read-Host "$q [y/N]") -match '^(y|д|yes|да)$' }
+
+# Вывод в колонки по ширине окна, сверху вниз. $Items — строки или @{ Text = ...; Color = ... }.
+function Write-Columns($Items, [int]$Indent = 8) {
+    $Items = @($Items | Where-Object { $_ })
+    if (-not $Items) { return }
+    $texts = @($Items | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Text } })
+    $w = 3 + ($texts | Measure-Object -Property Length -Maximum).Maximum
+    $win = 0; try { $win = $Host.UI.RawUI.WindowSize.Width } catch {}
+    if ($win -lt 40) { $win = 100 }   # ISE, перенаправленный вывод
+    $cols = [int][Math]::Max(1, [Math]::Floor(($win - $Indent - 1) / $w))
+    $rows = [int][Math]::Ceiling($Items.Count / $cols)
+    for ($r = 0; $r -lt $rows; $r++) {
+        Write-Host (' ' * $Indent) -NoNewline
+        for ($c = 0; $c -lt $cols; $c++) {
+            $i = $c * $rows + $r
+            if ($i -ge $Items.Count) { break }
+            $color = if ($Items[$i] -is [string]) { 'Gray' } else { $Items[$i].Color }
+            Write-Host $texts[$i].PadRight($w) -NoNewline -ForegroundColor $color
+        }
+        Write-Host ''
+    }
+}
 
 # Меню со стрелками: ↑/↓, Home/End — выбор, Enter — выполнить, цифра — сразу пункт, Esc — пункт «0».
 # $Items — массив пар @('ключ','текст'); пара с пустым ключом — разделитель. Возвращает ключ.
@@ -133,7 +156,7 @@ function Get-DefaultSettings {
         ExpireTime      = '01:00:00:00'
         ShareBannedIPs  = $false
         AutoNetworks    = $true           # добавлять обнаруженные частные подсети
-        IncludeRdpPeers = $true           # добавлять адреса текущих RDP-сессий при применении
+        IncludeRdpPeers = $true           # добавлять адреса активных RDP-сессий при применении
         ExtraWhitelist  = @()             # ручной список IP/CIDR
         Origin          = 'ours'          # ours — ставили мы; adopted — нашли готовую установку и импортировали
         AdoptedAt       = $null
@@ -214,28 +237,120 @@ function Get-LocalNetworks {
     $result | Sort-Object Entry -Unique
 }
 
-# Кто сейчас подключён по RDP — чтобы не забанить администратора.
+# Клиенты активных RDP-сессий через WTS API. Установленные TCP-соединения на порт RDP брать нельзя:
+# среди них боты, подбирающие пароль, — они попали бы в белый список (а это разрешающее правило брандмауэра).
+$RdpSource = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace IPBanManager
+{
+    public static class Rdp
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct WTS_SESSION_INFO { public int SessionId; public IntPtr WinStationName; public int State; }
+
+        [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr info, out int count);
+        [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+        [DllImport("wtsapi32.dll")]
+        static extern void WTSFreeMemory(IntPtr memory);
+
+        const int WTSActive = 0, WTSUserName = 5, WTSDomainName = 7, WTSClientAddress = 14, AF_INET = 2;
+
+        // "ip|DOMAIN\user" for every active session with a logged-on user and an IPv4 client address
+        public static string[] ActiveClients()
+        {
+            List<string> result = new List<string>();
+            IntPtr info; int count;
+            if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out info, out count)) return result.ToArray();
+            try
+            {
+                int size = Marshal.SizeOf(typeof(WTS_SESSION_INFO));
+                for (int i = 0; i < count; i++)
+                {
+                    WTS_SESSION_INFO s = (WTS_SESSION_INFO)Marshal.PtrToStructure(new IntPtr(info.ToInt64() + (long)i * size), typeof(WTS_SESSION_INFO));
+                    if (s.State != WTSActive) continue;
+                    string user = Query(s.SessionId, WTSUserName);
+                    if (String.IsNullOrEmpty(user)) continue;
+                    IntPtr buf; int bytes;
+                    if (!WTSQuerySessionInformation(IntPtr.Zero, s.SessionId, WTSClientAddress, out buf, out bytes)) continue;
+                    try
+                    {
+                        // WTS_CLIENT_ADDRESS: DWORD AddressFamily; BYTE Address[20]; IPv4 is in Address[2..5]
+                        if (Marshal.ReadInt32(buf) != AF_INET) continue;
+                        string ip = String.Format("{0}.{1}.{2}.{3}", Marshal.ReadByte(buf, 6), Marshal.ReadByte(buf, 7), Marshal.ReadByte(buf, 8), Marshal.ReadByte(buf, 9));
+                        string domain = Query(s.SessionId, WTSDomainName);
+                        result.Add(ip + "|" + (String.IsNullOrEmpty(domain) ? user : domain + "\\" + user));
+                    }
+                    finally { WTSFreeMemory(buf); }
+                }
+            }
+            finally { WTSFreeMemory(info); }
+            return result.ToArray();
+        }
+
+        static string Query(int sessionId, int infoClass)
+        {
+            IntPtr buf; int bytes;
+            if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, infoClass, out buf, out bytes)) return null;
+            try { return Marshal.PtrToStringUni(buf); }
+            finally { WTSFreeMemory(buf); }
+        }
+    }
+}
+'@
+
+# Кто сейчас работает по RDP (вошедшие пользователи) — чтобы не забанить администратора.
 function Get-RdpPeers {
-    $port = 3389
     try {
-        $p = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name PortNumber).PortNumber
-        if ($p) { $port = $p }
-    } catch {}
-    Get-NetTCPConnection -LocalPort $port -State Established -ErrorAction SilentlyContinue |
-        Where-Object { $_.RemoteAddress -notin @('127.0.0.1','::1') } |
-        Select-Object -ExpandProperty RemoteAddress -Unique
+        if (-not ('IPBanManager.Rdp' -as [type])) { Add-Type -TypeDefinition $RdpSource -ErrorAction Stop }
+        foreach ($c in [IPBanManager.Rdp]::ActiveClients()) {
+            $ip, $user = $c -split '\|', 2
+            [pscustomobject]@{ Address = $ip; User = $user }
+        }
+    } catch { Write-Warn "Не удалось получить RDP-сессии: $($_.Exception.Message)" }
 }
 
-function Build-Whitelist($s) {
+# Итоговый белый список с источником каждой записи; у дублей остаётся первый источник.
+function Get-WhitelistEntries($s) {
+    $list = @()
     # Для импортированной установки loopback не навязываем — он уже в списке, если был.
-    $list = if ($s.Origin -eq 'adopted') { @() } else { @('127.0.0.1', '::1') }
-    if ($s.AutoNetworks)    { $list += (Get-LocalNetworks).Entry }
-    if ($s.IncludeRdpPeers) {
-        $peers = @(Get-RdpPeers)
-        if ($peers) { $list += $peers; Write-Host "    RDP-подключения в белый список: $($peers -join ', ')" }
+    if ($s.Origin -ne 'adopted') { $list += '127.0.0.1', '::1' | ForEach-Object { [pscustomobject]@{ Entry = $_; Source = 'loopback'; Note = $null } } }
+    if ($s.AutoNetworks)    { $list += Get-LocalNetworks | ForEach-Object { [pscustomobject]@{ Entry = $_.Entry; Source = 'сети интерфейсов'; Note = $null } } }
+    if ($s.IncludeRdpPeers) { $list += Get-RdpPeers | ForEach-Object { [pscustomobject]@{ Entry = $_.Address; Source = 'RDP-сессии'; Note = $_.User } } }
+    $list += $s.ExtraWhitelist | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Entry = $_; Source = 'ручной список'; Note = $null } }
+    $seen = @{}
+    foreach ($e in $list) {
+        if (-not $e -or $seen.ContainsKey($e.Entry)) { continue }
+        $seen[$e.Entry] = $true
+        $e
     }
-    $list += $s.ExtraWhitelist
-    ($list | Where-Object { $_ } | Select-Object -Unique) -join ','
+}
+
+# Белый список: что добавится (+), уйдёт (-), останется (=) — по источникам, колонками.
+function Show-WhitelistDiff([string]$OldValue, $Entries) {
+    $old = @(($OldValue -split '[,;\s]+') | Where-Object { $_ })
+    $new = @($Entries | ForEach-Object { $_.Entry })
+    $add = @($new | Where-Object { $_ -notin $old })
+    $del = @($old | Where-Object { $_ -notin $new })
+    Write-Host ("    Белый список: сейчас {0}, станет {1}  (+{2} / -{3})" -f $old.Count, $new.Count, $add.Count, $del.Count) -ForegroundColor White
+    foreach ($src in 'loopback', 'сети интерфейсов', 'RDP-сессии', 'ручной список') {
+        $group = @($Entries | Where-Object { $_.Source -eq $src })
+        if (-not $group) { continue }
+        Write-Host "      $src" -ForegroundColor DarkCyan
+        Write-Columns @($group | ForEach-Object {
+            $t = if ($_.Note) { "$($_.Entry) ($($_.Note))" } else { $_.Entry }
+            if ($_.Entry -in $old) { @{ Text = "= $t"; Color = 'Gray' } } else { @{ Text = "+ $t"; Color = 'Green' } }
+        })
+    }
+    if ($del) {
+        Write-Host "      уйдут из списка" -ForegroundColor DarkCyan
+        Write-Columns @($del | ForEach-Object { @{ Text = "- $_"; Color = 'Red' } })
+    }
+    Write-Host "      + добавится   - уйдёт   = останется" -ForegroundColor DarkGray
 }
 #endregion
 
@@ -328,7 +443,8 @@ function Import-ExistingSettings {
     $s.AdoptedAt       = (Get-Date).ToString('s')
     Write-Step "Импортированы настройки существующей установки IPBan"
     Write-Host "    Попыток: $($s.Attempts); бан: $($s.BanTime); сброс: $($s.ExpireTime); глоб. база: $($s.ShareBannedIPs)"
-    Write-Host "    Белый список ($($s.ExtraWhitelist.Count)): $($s.ExtraWhitelist -join ', ')"
+    Write-Host "    Белый список ($($s.ExtraWhitelist.Count)):"
+    Write-Columns $s.ExtraWhitelist
     Write-Warn "Автоопределение сетей и RDP выключены, чтобы поведение не изменилось. Включить можно в Настройки → Белый список."
     Save-Settings $s
     $s
@@ -406,12 +522,19 @@ function Apply-Settings($s, [switch]$NoConfirm) {
     if (-not (Test-Path $cfg)) { throw "Не найден $cfg — IPBan не установлен?" }
 
     $old = Read-EffectiveValues
+    $wl  = @(Get-WhitelistEntries $s)
     $values = [ordered]@{
         FailedLoginAttemptsBeforeBan     = [string]$s.Attempts
         BanTime                          = $s.BanTime
         ExpireTime                       = $s.ExpireTime
-        Whitelist                        = Build-Whitelist $s
+        Whitelist                        = @($wl | ForEach-Object { $_.Entry }) -join ','
         UseDefaultBannedIPAddressHandler = ([string][bool]$s.ShareBannedIPs).ToLower()
+    }
+    $labels = @{
+        FailedLoginAttemptsBeforeBan     = 'Попыток до бана'
+        BanTime                          = 'Длительность бана'
+        ExpireTime                       = 'Сброс счётчика попыток'
+        UseDefaultBannedIPAddressHandler = 'Отправлять баны в глоб. базу DigitalRuby'
     }
 
     # Что именно изменится
@@ -423,16 +546,18 @@ function Apply-Settings($s, [switch]$NoConfirm) {
         } else { [string]$old[$_] -ne [string]$values[$_] }
     })
     if (-not $changes) { Write-Ok "Изменений нет — конфиг не трогаю"; return }
-    Write-Step "Изменения:"
+    Write-Step "Что изменится в $(Split-Path $cfg -Leaf):"
     foreach ($k in $changes) {
-        Write-Host ("    {0}" -f $k) -ForegroundColor White
-        Write-Host ("      было:  {0}" -f $old[$k])  -ForegroundColor DarkGray
-        Write-Host ("      стало: {0}" -f $values[$k])
+        if ($k -eq 'Whitelist') { continue }
+        $from, $to = foreach ($v in $old[$k], $values[$k]) {
+            switch ([string]$v) { '' { '(не задано)' } 'true' { 'да' } 'false' { 'нет' } default { $v } }
+        }
+        Write-Host ("    {0}:  " -f $labels[$k]) -NoNewline -ForegroundColor White
+        Write-Host $from -NoNewline -ForegroundColor DarkGray
+        Write-Host '  →  ' -NoNewline
+        Write-Host $to -ForegroundColor Green
     }
-    if ($changes -contains 'Whitelist') {
-        $lost = @(($old.Whitelist -split '[,;\s]+') | Where-Object { $_ -and $_ -notin ($values.Whitelist -split ',') })
-        if ($lost) { Write-Warn "Из белого списка УЙДУТ: $($lost -join ', ')" }
-    }
+    if ($changes -contains 'Whitelist') { Show-WhitelistDiff $old.Whitelist $wl }
     if ($Action -eq 'Menu' -and -not $NoConfirm -and -not (Confirm-Yes "Применить?")) { Write-Warn "Отменено"; return }
 
     # Пишем в основной конфиг и в override (если он есть и содержит ключ) — иначе override перебьёт
@@ -586,12 +711,13 @@ function Menu-Whitelist($s) {
         Write-Host "Белый список`n" -ForegroundColor Cyan
         Write-Host ("Автоопределение сетей: {0}" -f ($(if ($s.AutoNetworks) { 'ВКЛ' } else { 'выкл' })))
         Get-LocalNetworks | Format-Table Entry, Type, From -AutoSize | Out-Host
-        Write-Host ("Текущие RDP-подключения: {0}   (добавлять: {1})" -f ((@(Get-RdpPeers) -join ', ')), ($(if ($s.IncludeRdpPeers) { 'да' } else { 'нет' })))
+        $peers = @(Get-RdpPeers | ForEach-Object { "$($_.Address) ($($_.User))" })
+        Write-Host ("Активные RDP-сессии: {0}   (добавлять: {1})" -f $(if ($peers) { $peers -join ', ' } else { 'нет' }), $(if ($s.IncludeRdpPeers) { 'да' } else { 'нет' }))
         Write-Host "`nРучной список:"
         if ($s.ExtraWhitelist.Count) { $i = 1; foreach ($e in $s.ExtraWhitelist) { Write-Host "  $i) $e"; $i++ } } else { Write-Host "  (пусто)" }
         $c = Select-Menu @(
             @('1', 'Вкл/выкл автоопределение частных сетей'),
-            @('2', 'Вкл/выкл добавление текущих RDP-подключений'),
+            @('2', 'Вкл/выкл добавление активных RDP-сессий'),
             @('3', 'Добавить IP/подсеть/домен/URL списка вручную'),
             @('4', 'Удалить из ручного списка'),
             @('5', 'Показать итоговый белый список'),
@@ -627,7 +753,7 @@ function Menu-Whitelist($s) {
                     $s.ExtraWhitelist = @($s.ExtraWhitelist | Where-Object { $_ -ne $del })
                 }
             }
-            '5' { Write-Host ((Build-Whitelist $s) -split ',' | Out-String); Pause-Menu }
+            '5' { Write-Host ''; Show-WhitelistDiff (Read-EffectiveValues).Whitelist @(Get-WhitelistEntries $s); Pause-Menu }
             '0' { return }
         }
     }
@@ -659,7 +785,7 @@ function Menu-Settings {
             '3' { $s.ExpireTime = Read-Duration "Сброс счётчика"   $s.ExpireTime }
             '4' { Menu-Whitelist $s }
             '5' { $s.ShareBannedIPs = -not $s.ShareBannedIPs }
-            '6' { $b = @(Get-BannedIPs); Write-Host "Всего: $($b.Count)"; $b | Out-Host; Pause-Menu }
+            '6' { $b = @(Get-BannedIPs); Write-Host "Всего: $($b.Count)"; Write-Columns $b 2; Pause-Menu }
             '7' {
                 $ip = Read-Host "IP для разбана"
                 if (Test-IpOrCidr $ip) {
